@@ -1,38 +1,47 @@
+<div align="center">
+
 # Hazari Scoreboard
 
-A lightweight, responsive scorekeeper for four-player Hazari games. Player names, hand scores, and match history are saved in the browser on the current device.
+### A little more clarity around the table.
 
-## Run locally
+<img src="../assets/hazari-dashboard.svg" alt="3D-inspired preview of the Hazari four-player scoreboard" width="100%" />
+
+**Four players · 360 points per hand · Match history that remembers the winner**
+
+</div>
+
+## Get started
+
+From this folder, run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Then open [http://localhost:3000](http://localhost:3000).
 
-## Keep score
+## How a hand is scored
 
-1. Edit the four player names on the leaderboard.
-2. Enter each player's points for a hand and choose **Add hand**. Scores may be negative.
-3. Use **Undo last** to remove the most recently added hand, or **Export** to download a CSV of the hand scores.
-4. Choose **New game** to clear the match after confirming.
+Every hand adds up to **360 points**. Enter any three players' scores and the fourth is calculated automatically. With only two scores entered, Hazari waits for more information. If you know the other two players tied, confirm the tie; it will calculate their points only when the remainder divides evenly into whole numbers.
 
-Each hand totals 360 points. The app calculates a missing fourth score from any three entered scores. With two scores, it only fills the other two when you confirm that they tied and the remaining points divide evenly. Match data stays in this browser's local storage; it is not synced to other devices.
+## Save a match
 
-Choose **Finish match** to save the winner, final totals, date, and all hand scores to match history, then start the next match. Tied winners are recorded together.
+Choose **Finish match** to record the date, winner or tied winners, final totals, and all hand scores. Expand a saved match in **Match history** to review each hand. Match data stays in this browser on this device.
 
-## Production
+## Deploy to Vercel
+
+Import the repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js framework settings; no environment variables are required.
+
+## Production build
 
 ```bash
 npm run build
 npm start
 ```
 
-## Deploy to Vercel
+<div align="center">
 
-1. Import this repository in Vercel.
-2. Set **Root Directory** to `hazari-scoreboard` (the Next.js app is in this folder).
-3. Keep the detected Next.js framework settings. Vercel will use `npm run build`; no environment variables are required.
+**Developed by Rimon**
 
-Match and score history is stored in each visitor's browser, so it stays on that device and browser after deployment.
+</div>
