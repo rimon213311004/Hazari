@@ -21,13 +21,13 @@
 
 ---
 
-Hazari is a responsive, shared scorekeeper for four-player card nights. Add hands as you play, follow the leaderboard live across visitors, and keep the winner and full hand history when a match ends.
+Hazari is a responsive scorekeeper for four-player card nights. Add hands as you play, follow the leaderboard live, and keep the winner and full hand history when a match ends.
 
 ## At the table
 
-| Keep track | Play anywhere | Follow the same table |
+| Keep track | Play anywhere | Pick up where you left off |
 | --- | --- | --- |
-| Live player totals, round-by-round scores, ties, and match winners. | A responsive layout for phones, tablets, laptops, and desktops. | Visitors see and edit the same match and history in real time. |
+| Live player totals, round-by-round scores, ties, and match winners. | A responsive layout for phones, tablets, laptops, and desktops. | Match history saves in your browser, including every hand and the final result. |
 
 ### Automatic scoring
 
@@ -54,11 +54,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Live site: [hazari-git-main-rimon5.vercel.app](https://hazari-git-main-rimon5.vercel.app/).
 
-The live scoreboard uses MongoDB Atlas. Create an Atlas database and user, allow your deployment in Atlas Network Access, then set the connection string as `MONGODB_URI` in `hazari-scoreboard/.env.local` and in Vercel. Keep this secret server-side; do not add a `NEXT_PUBLIC_` prefix or commit it.
+Import this repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js settings; no environment variables are needed.
 
-Import this repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js settings and add `MONGODB_URI` for Production, Preview, and Development, then redeploy. Without this variable, the app runs in local-only mode.
-
-> The shared board is public and editable by anyone who visits it, including the ability to finish or reset a match. Do not use it for private or sensitive information.
+> Match history is stored in the visitor's browser. It stays on that browser and device and does not sync across devices.
 
 ## Production build
 

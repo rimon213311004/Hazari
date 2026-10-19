@@ -1,48 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Round = { id: number; scores: number[] };
 type Game = { players: string[]; rounds: Round[] };
 type CompletedMatch = { id: number; number: number; completedAt: string; players: string[]; rounds: Round[]; totals: number[] };
-type SharedState = { game: Game; matches: CompletedMatch[] };
-type SyncStatus = "local" | "connecting" | "live" | "saving" | "offline";
 const initial: Game = { players: ["Player 1", "Player 2", "Player 3", "Player 4"], rounds: [] };
 const storageKey = "hazari-scoreboard-v1";
 const matchHistoryKey = "hazari-match-history-v1";
 const draftStorageKey = "hazari-score-draft-v1";
-
-function readLocalCopy(): SharedState {
-  let game = initial;
-  let matches: CompletedMatch[] = [];
-  try {
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
-      const parsed = JSON.parse(saved) as Game;
-      if (parsed.players?.length === 4 && Array.isArray(parsed.rounds)) game = parsed;
-    }
-    const savedMatches = localStorage.getItem(matchHistoryKey);
-    if (savedMatches) {
-      const parsed = JSON.parse(savedMatches) as CompletedMatch[];
-      if (Array.isArray(parsed)) matches = parsed.filter((match) => match.players?.length === 4 && Array.isArray(match.rounds) && match.totals?.length === 4);
-    }
-  } catch { /* Start a fresh match if saved data is unreadable. */ }
-  return { game, matches };
-}
-
-function hasSavedProgress(state: SharedState) {
-  return state.game.rounds.length > 0 || state.matches.length > 0;
-}
+const tieStorageKey = "hazari-score-draft-tied-v1";
 
 function getWinners(scores: number[]) {
   const highScore = Math.max(...scores);
   return scores.flatMap((score, index) => score === highScore ? [index] : []);
-}
-
-function isSharedState(value: unknown): value is SharedState {
-  if (!value || typeof value !== "object") return false;
-  const data = value as Partial<SharedState>;
-  return Array.isArray(data.game?.players) && data.game.players.length === 4 && Array.isArray(data.game.rounds) && Array.isArray(data.matches);
 }
 
 function Icon({ name }: { name: "cards" | "plus" | "undo" | "trash" | "crown" | "download" }) {
@@ -58,108 +29,33 @@ function Icon({ name }: { name: "cards" | "plus" | "undo" | "trash" | "crown" | 
 export default function Home() {
   const [game, setGame] = useState<Game>(initial);
   const [matches, setMatches] = useState<CompletedMatch[]>([]);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [draft, setDraft] = useState(["", "", "", ""]);
   const [remainingPlayersTied, setRemainingPlayersTied] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
-  const lastSharedSnapshot = useRef<string | null>(null);
-  const sharedWriteQueue = useRef<Promise<void>>(Promise.resolve());
-  const currentSharedState = useRef<SharedState>({ game: initial, matches: [] });
-  currentSharedState.current = { game, matches };
 
   useEffect(() => {
-    let active = true;
-    const applyState = (state: SharedState) => {
-      currentSharedState.current = state;
-      lastSharedSnapshot.current = JSON.stringify(state);
-      setGame(state.game);
-      setMatches(state.matches);
-    };
-    if (!loaded) {
-      try {
-        const savedDraft = localStorage.getItem(draftStorageKey);
-        if (savedDraft) {
-          const parsedDraft = JSON.parse(savedDraft) as unknown;
-          if (Array.isArray(parsedDraft) && parsedDraft.length === 4 && parsedDraft.every((value) => typeof value === "string")) setDraft(parsedDraft);
-        }
-      } catch { /* Ignore an invalid saved hand entry. */ }
-    }
-    const applySharedState = (shared: SharedState) => {
-      applyState(shared);
-      setSyncStatus("live");
-    };
-    const loadSharedState = async (initialLoad: boolean) => {
-      try {
-        const response = await fetch("/api/scoreboard", { cache: "no-store" });
-        if (!active) return;
-        if (response.status === 503) {
-          const body = await response.json().catch(() => null);
-          if (body?.configured === false) {
-            if (initialLoad) { applyState(readLocalCopy()); setSyncStatus("local"); }
-          } else {
-            setSyncStatus("offline");
-            if (initialLoad) applyState(readLocalCopy());
-          }
-          return;
-        }
-        if (!response.ok) throw new Error("Shared scoreboard unavailable");
-        const shared: unknown = await response.json();
-        if (!isSharedState(shared)) throw new Error("Invalid shared scoreboard");
-        if (initialLoad) {
-          const localCopy = readLocalCopy();
-          if (!hasSavedProgress(shared) && hasSavedProgress(localCopy)) {
-            applyState(localCopy);
-            setSyncStatus("saving");
-            const saveResponse = await fetch("/api/scoreboard", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(localCopy),
-            });
-            if (saveResponse.ok) {
-              lastSharedSnapshot.current = JSON.stringify(localCopy);
-              setSyncStatus("live");
-            } else {
-              setSyncStatus("offline");
-            }
-          } else {
-            applySharedState(shared);
-          }
-        } else if (JSON.stringify(currentSharedState.current) === lastSharedSnapshot.current && JSON.stringify(shared) !== lastSharedSnapshot.current) {
-          if (!hasSavedProgress(shared) && hasSavedProgress(currentSharedState.current)) {
-            const localProgress = currentSharedState.current;
-            setSyncStatus("saving");
-            const saveResponse = await fetch("/api/scoreboard", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(localProgress),
-            });
-            if (saveResponse.ok) {
-              lastSharedSnapshot.current = JSON.stringify(localProgress);
-              setSyncStatus("live");
-            } else {
-              setSyncStatus("offline");
-            }
-          } else {
-            applySharedState(shared);
-          }
-        }
-      } catch {
-        if (!active) return;
-        setSyncStatus("offline");
-        if (initialLoad) applyState(readLocalCopy());
-      } finally {
-        if (active && initialLoad) setLoaded(true);
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Game;
+        if (parsed.players?.length === 4 && Array.isArray(parsed.rounds)) setGame(parsed);
       }
-    };
-    if (!loaded) {
-      void loadSharedState(true);
-      return () => { active = false; };
-    }
-    const poll = window.setInterval(() => { void loadSharedState(false); }, 1800);
-    return () => { active = false; window.clearInterval(poll); };
-  }, [loaded]);
+      const savedMatches = localStorage.getItem(matchHistoryKey);
+      if (savedMatches) {
+        const parsedMatches = JSON.parse(savedMatches) as CompletedMatch[];
+        if (Array.isArray(parsedMatches)) setMatches(parsedMatches.filter((match) => match.players?.length === 4 && Array.isArray(match.rounds) && match.totals?.length === 4));
+      }
+      const savedDraft = localStorage.getItem(draftStorageKey);
+      if (savedDraft) {
+        const parsedDraft = JSON.parse(savedDraft) as unknown;
+        if (Array.isArray(parsedDraft) && parsedDraft.length === 4 && parsedDraft.every((value) => typeof value === "string")) setDraft(parsedDraft);
+      }
+      setRemainingPlayersTied(localStorage.getItem(tieStorageKey) === "true");
+    } catch { /* Start a fresh match if saved data is unreadable. */ }
+    setLoaded(true);
+  }, []);
 
   useEffect(() => {
     if (loaded) localStorage.setItem(storageKey, JSON.stringify(game));
@@ -170,55 +66,10 @@ export default function Home() {
   }, [matches, loaded]);
 
   useEffect(() => {
-    if (loaded) localStorage.setItem(draftStorageKey, JSON.stringify(draft));
-  }, [draft, loaded]);
-
-  useEffect(() => {
     if (!loaded) return;
-    const flushPendingSave = () => {
-      const latest = currentSharedState.current;
-      const snapshot = JSON.stringify(latest);
-      if (snapshot === lastSharedSnapshot.current) return;
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(latest.game));
-        localStorage.setItem(matchHistoryKey, JSON.stringify(latest.matches));
-        fetch("/api/scoreboard", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: snapshot,
-          keepalive: true,
-        }).catch(() => undefined);
-      } catch { /* The browser may block storage or keepalive requests. */ }
-    };
-    window.addEventListener("pagehide", flushPendingSave);
-    return () => window.removeEventListener("pagehide", flushPendingSave);
-  }, [loaded]);
-
-  useEffect(() => {
-    if (!loaded || syncStatus === "local") return;
-    const payload: SharedState = { game, matches };
-    const snapshot = JSON.stringify(payload);
-    if (snapshot === lastSharedSnapshot.current) return;
-
-    const timeout = window.setTimeout(() => {
-      setSyncStatus("saving");
-      sharedWriteQueue.current = sharedWriteQueue.current.then(async () => {
-        const response = await fetch("/api/scoreboard", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: snapshot,
-        });
-        if (!response.ok) {
-          setSyncStatus("offline");
-          return;
-        }
-        lastSharedSnapshot.current = snapshot;
-        setSyncStatus("live");
-      }).catch(() => setSyncStatus("offline"));
-    }, 350);
-
-    return () => window.clearTimeout(timeout);
-  }, [game, matches, loaded, syncStatus]);
+    localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    localStorage.setItem(tieStorageKey, String(remainingPlayersTied));
+  }, [draft, remainingPlayersTied, loaded]);
 
   const totals = useMemo(() => game.players.map((_, i) => game.rounds.reduce((sum, round) => sum + (round.scores[i] || 0), 0)), [game]);
   const leader = Math.max(...totals);
@@ -314,7 +165,7 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <a className="brand" href="#home" aria-label="Hazari home"><span className="brand-mark"><Icon name="cards" /></span><span>hazari<span className="brand-dot">.</span></span></a>
-        <div className="topbar-right"><span className={`live-dot sync-${syncStatus}`} /><span className="sync-label">{syncStatus === "live" ? "LIVE SHARED" : syncStatus === "saving" ? "SYNCING" : syncStatus === "connecting" ? "CONNECTING" : syncStatus === "offline" ? "OFFLINE · LOCAL COPY" : "LOCAL ONLY"}</span><span className="topbar-divider" /> MATCH {String(matches.length + 1).padStart(2, "0")} <span className="topbar-divider" /> <span className="round-counter">{matches.length} COMPLETED</span> <span className="topbar-divider" /> <span className="round-counter">{game.rounds.length} {game.rounds.length === 1 ? "ROUND" : "ROUNDS"}</span></div>
+        <div className="topbar-right"><span className="live-dot" /> MATCH {String(matches.length + 1).padStart(2, "0")} <span className="topbar-divider" /> <span className="round-counter">{matches.length} COMPLETED</span> <span className="topbar-divider" /> <span className="round-counter">{game.rounds.length} {game.rounds.length === 1 ? "ROUND" : "ROUNDS"}</span></div>
       </header>
 
       <section className="hero" id="home">

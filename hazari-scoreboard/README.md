@@ -6,7 +6,7 @@
 
 <img src="../assets/hazari-dashboard.svg" alt="3D-inspired preview of the Hazari four-player scoreboard" width="100%" />
 
-**Four players | 360 points per hand | One live scoreboard for everyone**
+**Four players · 360 points per hand · Match history that remembers the winner**
 
 [Open the live scoreboard](https://hazari-git-main-rimon5.vercel.app/)
 
@@ -29,15 +29,11 @@ Every hand adds up to **360 points**. Enter any three players' scores and the fo
 
 ## Save a match
 
-Choose **Finish match** to record the date, winner or tied winners, final totals, and all hand scores. Expand a saved match in **Match history** to review each hand. With MongoDB Atlas configured, all visitors see and edit this same board; updates appear within a couple of seconds.
+Choose **Finish match** to record the date, winner or tied winners, final totals, and all hand scores. Expand a saved match in **Match history** to review each hand. Match data stays in this browser on this device.
 
 ## Deploy to Vercel
 
-Live site: [hazari-git-main-rimon5.vercel.app](https://hazari-git-main-rimon5.vercel.app/). Create a MongoDB Atlas database and user, allow your deployment in Atlas Network Access, and set the connection string as `MONGODB_URI` in `.env.local` locally and in Vercel. See `.env.example` for the format. Keep this secret server-side; do not add a `NEXT_PUBLIC_` prefix or commit `.env.local`.
-
-Import the repository in Vercel and set **Root Directory** to `hazari-scoreboard`; keep the detected Next.js framework settings. Add `MONGODB_URI` for Production, Preview, and Development, then redeploy. Without it, the app stays in local-only mode. With it, the shared board is public and anyone can edit or reset it.
-
-Shared match history is stored in MongoDB Atlas and is visible to every visitor.
+Live site: [hazari-git-main-rimon5.vercel.app](https://hazari-git-main-rimon5.vercel.app/). To deploy updates, import the repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js framework settings; no environment variables are required.
 
 ## Production build
 
