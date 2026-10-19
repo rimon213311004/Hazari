@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Round = { id: number; scores: number[] };
 type Game = { players: string[]; rounds: Round[] };
 type CompletedMatch = { id: number; number: number; completedAt: string; players: string[]; rounds: Round[]; totals: number[] };
+type SharedState = { game: Game; matches: CompletedMatch[] };
+type SyncStatus = "local" | "connecting" | "live" | "saving" | "offline";
 const initial: Game = { players: ["Player 1", "Player 2", "Player 3", "Player 4"], rounds: [] };
 const storageKey = "hazari-scoreboard-v1";
 const matchHistoryKey = "hazari-match-history-v1";
@@ -12,6 +14,12 @@ const matchHistoryKey = "hazari-match-history-v1";
 function getWinners(scores: number[]) {
   const highScore = Math.max(...scores);
   return scores.flatMap((score, index) => score === highScore ? [index] : []);
+}
+
+function isSharedState(value: unknown): value is SharedState {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Partial<SharedState>;
+  return Array.isArray(data.game?.players) && data.game.players.length === 4 && Array.isArray(data.game.rounds) && Array.isArray(data.matches);
 }
 
 function Icon({ name }: { name: "cards" | "plus" | "undo" | "trash" | "crown" | "download" }) {
@@ -27,27 +35,76 @@ function Icon({ name }: { name: "cards" | "plus" | "undo" | "trash" | "crown" | 
 export default function Home() {
   const [game, setGame] = useState<Game>(initial);
   const [matches, setMatches] = useState<CompletedMatch[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [draft, setDraft] = useState(["", "", "", ""]);
   const [remainingPlayersTied, setRemainingPlayersTied] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const lastSharedSnapshot = useRef<string | null>(null);
+  const sharedWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const currentSharedState = useRef<SharedState>({ game: initial, matches: [] });
+  currentSharedState.current = { game, matches };
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Game;
-        if (parsed.players?.length === 4 && Array.isArray(parsed.rounds)) setGame(parsed);
+    let active = true;
+    const loadLocalCopy = () => {
+      let nextGame = initial;
+      let nextMatches: CompletedMatch[] = [];
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved) as Game;
+          if (parsed.players?.length === 4 && Array.isArray(parsed.rounds)) nextGame = parsed;
+        }
+        const savedMatches = localStorage.getItem(matchHistoryKey);
+        if (savedMatches) {
+          const parsedMatches = JSON.parse(savedMatches) as CompletedMatch[];
+          if (Array.isArray(parsedMatches)) nextMatches = parsedMatches.filter((match) => match.players?.length === 4 && Array.isArray(match.rounds) && match.totals?.length === 4);
+        }
+      } catch { /* Start a fresh match if saved data is unreadable. */ }
+      setGame(nextGame);
+      setMatches(nextMatches);
+      currentSharedState.current = { game: nextGame, matches: nextMatches };
+      lastSharedSnapshot.current = JSON.stringify({ game: nextGame, matches: nextMatches });
+    };
+    const applySharedState = (shared: SharedState) => {
+      lastSharedSnapshot.current = JSON.stringify(shared);
+      currentSharedState.current = shared;
+      setGame(shared.game);
+      setMatches(shared.matches);
+      setSyncStatus("live");
+    };
+    const loadSharedState = async (initialLoad: boolean) => {
+      try {
+        const response = await fetch("/api/scoreboard", { cache: "no-store" });
+        if (!active) return;
+        if (response.status === 503) {
+          const body = await response.json().catch(() => null);
+          if (body?.configured === false) {
+            if (initialLoad) { loadLocalCopy(); setSyncStatus("local"); }
+          } else {
+            setSyncStatus("offline");
+            if (initialLoad) loadLocalCopy();
+          }
+          return;
+        }
+        if (!response.ok) throw new Error("Shared scoreboard unavailable");
+        const shared: unknown = await response.json();
+        if (!isSharedState(shared)) throw new Error("Invalid shared scoreboard");
+        if (initialLoad || JSON.stringify(currentSharedState.current) === lastSharedSnapshot.current) applySharedState(shared);
+      } catch {
+        if (!active) return;
+        setSyncStatus("offline");
+        if (initialLoad) loadLocalCopy();
+      } finally {
+        if (active && initialLoad) setLoaded(true);
       }
-      const savedMatches = localStorage.getItem(matchHistoryKey);
-      if (savedMatches) {
-        const parsedMatches = JSON.parse(savedMatches) as CompletedMatch[];
-        if (Array.isArray(parsedMatches)) setMatches(parsedMatches.filter((match) => match.players?.length === 4 && Array.isArray(match.rounds) && match.totals?.length === 4));
-      }
-    } catch { /* Start a fresh match if saved data is unreadable. */ }
-    setLoaded(true);
-  }, []);
+    };
+    void loadSharedState(true);
+    const poll = window.setInterval(() => { if (loaded) void loadSharedState(false); }, 1800);
+    return () => { active = false; window.clearInterval(poll); };
+  }, [loaded]);
 
   useEffect(() => {
     if (loaded) localStorage.setItem(storageKey, JSON.stringify(game));
@@ -56,6 +113,32 @@ export default function Home() {
   useEffect(() => {
     if (loaded) localStorage.setItem(matchHistoryKey, JSON.stringify(matches));
   }, [matches, loaded]);
+
+  useEffect(() => {
+    if (!loaded || syncStatus === "local") return;
+    const payload: SharedState = { game, matches };
+    const snapshot = JSON.stringify(payload);
+    if (snapshot === lastSharedSnapshot.current) return;
+
+    const timeout = window.setTimeout(() => {
+      setSyncStatus("saving");
+      sharedWriteQueue.current = sharedWriteQueue.current.then(async () => {
+        const response = await fetch("/api/scoreboard", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: snapshot,
+        });
+        if (!response.ok) {
+          setSyncStatus("offline");
+          return;
+        }
+        lastSharedSnapshot.current = snapshot;
+        setSyncStatus("live");
+      }).catch(() => setSyncStatus("offline"));
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [game, matches, loaded, syncStatus]);
 
   const totals = useMemo(() => game.players.map((_, i) => game.rounds.reduce((sum, round) => sum + (round.scores[i] || 0), 0)), [game]);
   const leader = Math.max(...totals);
@@ -151,7 +234,7 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <a className="brand" href="#home" aria-label="Hazari home"><span className="brand-mark"><Icon name="cards" /></span><span>hazari<span className="brand-dot">.</span></span></a>
-        <div className="topbar-right"><span className="live-dot" /> MATCH {String(matches.length + 1).padStart(2, "0")} <span className="topbar-divider" /> <span className="round-counter">{matches.length} COMPLETED</span> <span className="topbar-divider" /> <span className="round-counter">{game.rounds.length} {game.rounds.length === 1 ? "ROUND" : "ROUNDS"}</span></div>
+        <div className="topbar-right"><span className={`live-dot sync-${syncStatus}`} /><span className="sync-label">{syncStatus === "live" ? "LIVE SHARED" : syncStatus === "saving" ? "SYNCING" : syncStatus === "connecting" ? "CONNECTING" : syncStatus === "offline" ? "OFFLINE · LOCAL COPY" : "LOCAL ONLY"}</span><span className="topbar-divider" /> MATCH {String(matches.length + 1).padStart(2, "0")} <span className="topbar-divider" /> <span className="round-counter">{matches.length} COMPLETED</span> <span className="topbar-divider" /> <span className="round-counter">{game.rounds.length} {game.rounds.length === 1 ? "ROUND" : "ROUNDS"}</span></div>
       </header>
 
       <section className="hero" id="home">
