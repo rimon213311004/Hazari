@@ -10,6 +10,29 @@ type SyncStatus = "local" | "connecting" | "live" | "saving" | "offline";
 const initial: Game = { players: ["Player 1", "Player 2", "Player 3", "Player 4"], rounds: [] };
 const storageKey = "hazari-scoreboard-v1";
 const matchHistoryKey = "hazari-match-history-v1";
+const draftStorageKey = "hazari-score-draft-v1";
+
+function readLocalCopy(): SharedState {
+  let game = initial;
+  let matches: CompletedMatch[] = [];
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      const parsed = JSON.parse(saved) as Game;
+      if (parsed.players?.length === 4 && Array.isArray(parsed.rounds)) game = parsed;
+    }
+    const savedMatches = localStorage.getItem(matchHistoryKey);
+    if (savedMatches) {
+      const parsed = JSON.parse(savedMatches) as CompletedMatch[];
+      if (Array.isArray(parsed)) matches = parsed.filter((match) => match.players?.length === 4 && Array.isArray(match.rounds) && match.totals?.length === 4);
+    }
+  } catch { /* Start a fresh match if saved data is unreadable. */ }
+  return { game, matches };
+}
+
+function hasSavedProgress(state: SharedState) {
+  return state.game.rounds.length > 0 || state.matches.length > 0;
+}
 
 function getWinners(scores: number[]) {
   const highScore = Math.max(...scores);
@@ -48,31 +71,23 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    const loadLocalCopy = () => {
-      let nextGame = initial;
-      let nextMatches: CompletedMatch[] = [];
-      try {
-        const saved = localStorage.getItem(storageKey);
-        if (saved) {
-          const parsed = JSON.parse(saved) as Game;
-          if (parsed.players?.length === 4 && Array.isArray(parsed.rounds)) nextGame = parsed;
-        }
-        const savedMatches = localStorage.getItem(matchHistoryKey);
-        if (savedMatches) {
-          const parsedMatches = JSON.parse(savedMatches) as CompletedMatch[];
-          if (Array.isArray(parsedMatches)) nextMatches = parsedMatches.filter((match) => match.players?.length === 4 && Array.isArray(match.rounds) && match.totals?.length === 4);
-        }
-      } catch { /* Start a fresh match if saved data is unreadable. */ }
-      setGame(nextGame);
-      setMatches(nextMatches);
-      currentSharedState.current = { game: nextGame, matches: nextMatches };
-      lastSharedSnapshot.current = JSON.stringify({ game: nextGame, matches: nextMatches });
+    const applyState = (state: SharedState) => {
+      currentSharedState.current = state;
+      lastSharedSnapshot.current = JSON.stringify(state);
+      setGame(state.game);
+      setMatches(state.matches);
     };
+    if (!loaded) {
+      try {
+        const savedDraft = localStorage.getItem(draftStorageKey);
+        if (savedDraft) {
+          const parsedDraft = JSON.parse(savedDraft) as unknown;
+          if (Array.isArray(parsedDraft) && parsedDraft.length === 4 && parsedDraft.every((value) => typeof value === "string")) setDraft(parsedDraft);
+        }
+      } catch { /* Ignore an invalid saved hand entry. */ }
+    }
     const applySharedState = (shared: SharedState) => {
-      lastSharedSnapshot.current = JSON.stringify(shared);
-      currentSharedState.current = shared;
-      setGame(shared.game);
-      setMatches(shared.matches);
+      applyState(shared);
       setSyncStatus("live");
     };
     const loadSharedState = async (initialLoad: boolean) => {
@@ -82,27 +97,67 @@ export default function Home() {
         if (response.status === 503) {
           const body = await response.json().catch(() => null);
           if (body?.configured === false) {
-            if (initialLoad) { loadLocalCopy(); setSyncStatus("local"); }
+            if (initialLoad) { applyState(readLocalCopy()); setSyncStatus("local"); }
           } else {
             setSyncStatus("offline");
-            if (initialLoad) loadLocalCopy();
+            if (initialLoad) applyState(readLocalCopy());
           }
           return;
         }
         if (!response.ok) throw new Error("Shared scoreboard unavailable");
         const shared: unknown = await response.json();
         if (!isSharedState(shared)) throw new Error("Invalid shared scoreboard");
-        if (initialLoad || JSON.stringify(currentSharedState.current) === lastSharedSnapshot.current) applySharedState(shared);
+        if (initialLoad) {
+          const localCopy = readLocalCopy();
+          if (!hasSavedProgress(shared) && hasSavedProgress(localCopy)) {
+            applyState(localCopy);
+            setSyncStatus("saving");
+            const saveResponse = await fetch("/api/scoreboard", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(localCopy),
+            });
+            if (saveResponse.ok) {
+              lastSharedSnapshot.current = JSON.stringify(localCopy);
+              setSyncStatus("live");
+            } else {
+              setSyncStatus("offline");
+            }
+          } else {
+            applySharedState(shared);
+          }
+        } else if (JSON.stringify(currentSharedState.current) === lastSharedSnapshot.current && JSON.stringify(shared) !== lastSharedSnapshot.current) {
+          if (!hasSavedProgress(shared) && hasSavedProgress(currentSharedState.current)) {
+            const localProgress = currentSharedState.current;
+            setSyncStatus("saving");
+            const saveResponse = await fetch("/api/scoreboard", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(localProgress),
+            });
+            if (saveResponse.ok) {
+              lastSharedSnapshot.current = JSON.stringify(localProgress);
+              setSyncStatus("live");
+            } else {
+              setSyncStatus("offline");
+            }
+          } else {
+            applySharedState(shared);
+          }
+        }
       } catch {
         if (!active) return;
         setSyncStatus("offline");
-        if (initialLoad) loadLocalCopy();
+        if (initialLoad) applyState(readLocalCopy());
       } finally {
         if (active && initialLoad) setLoaded(true);
       }
     };
-    void loadSharedState(true);
-    const poll = window.setInterval(() => { if (loaded) void loadSharedState(false); }, 1800);
+    if (!loaded) {
+      void loadSharedState(true);
+      return () => { active = false; };
+    }
+    const poll = window.setInterval(() => { void loadSharedState(false); }, 1800);
     return () => { active = false; window.clearInterval(poll); };
   }, [loaded]);
 
@@ -113,6 +168,31 @@ export default function Home() {
   useEffect(() => {
     if (loaded) localStorage.setItem(matchHistoryKey, JSON.stringify(matches));
   }, [matches, loaded]);
+
+  useEffect(() => {
+    if (loaded) localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+  }, [draft, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const flushPendingSave = () => {
+      const latest = currentSharedState.current;
+      const snapshot = JSON.stringify(latest);
+      if (snapshot === lastSharedSnapshot.current) return;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(latest.game));
+        localStorage.setItem(matchHistoryKey, JSON.stringify(latest.matches));
+        fetch("/api/scoreboard", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: snapshot,
+          keepalive: true,
+        }).catch(() => undefined);
+      } catch { /* The browser may block storage or keepalive requests. */ }
+    };
+    window.addEventListener("pagehide", flushPendingSave);
+    return () => window.removeEventListener("pagehide", flushPendingSave);
+  }, [loaded]);
 
   useEffect(() => {
     if (!loaded || syncStatus === "local") return;
