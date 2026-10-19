@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Made%20by-Rimon-315d4b?style=flat-square" alt="Made by Rimon" />
 </p>
 
-[Play locally](#run-locally) · [Scoring rules](#automatic-scoring) · [Deploy to Vercel](#deploy-to-vercel)
+[Open the live scoreboard](https://hazari-git-main-rimon5.vercel.app/) · [Play locally](#run-locally) · [Scoring rules](#automatic-scoring) · [Deploy to Vercel](#deploy-to-vercel)
 
 </div>
 
@@ -51,6 +51,8 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000).
 
 ## Deploy to Vercel
+
+Live site: [hazari-git-main-rimon5.vercel.app](https://hazari-git-main-rimon5.vercel.app/).
 
 Import this repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js settings; no environment variables are needed.
 

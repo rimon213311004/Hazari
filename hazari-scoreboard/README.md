@@ -8,6 +8,8 @@
 
 **Four players · 360 points per hand · Match history that remembers the winner**
 
+[Open the live scoreboard](https://hazari-git-main-rimon5.vercel.app/)
+
 </div>
 
 ## Get started
@@ -31,7 +33,7 @@ Choose **Finish match** to record the date, winner or tied winners, final totals
 
 ## Deploy to Vercel
 
-Import the repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js framework settings; no environment variables are required.
+Live site: [hazari-git-main-rimon5.vercel.app](https://hazari-git-main-rimon5.vercel.app/). To deploy updates, import the repository in Vercel and set **Root Directory** to `hazari-scoreboard`. Keep the detected Next.js framework settings; no environment variables are required.
 
 ## Production build
 
